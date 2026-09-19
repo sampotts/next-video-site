@@ -1,4 +1,4 @@
-import type { HTML, Root } from 'mdast';
+import type { Html, Root } from 'mdast';
 import remarkParse from 'remark-parse';
 import { unified } from 'unified';
 import { visit } from 'unist-util-visit';
@@ -22,7 +22,7 @@ export function escapeBareJsxTags(markdown: string): string {
   const tree = unified().use(remarkParse).parse(markdown) as Root;
 
   const replacements: Array<{ start: number; end: number; value: string }> = [];
-  visit(tree, 'html', (node: HTML) => {
+  visit(tree, 'html', (node: Html) => {
     const start = node.position?.start.offset;
     const end = node.position?.end.offset;
     if (start === undefined || end === undefined) return;
