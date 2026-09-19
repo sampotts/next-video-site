@@ -1,16 +1,32 @@
 import Image from 'next/image';
 import Link from 'next/link';
 
+import { reportError } from 'app/_lib/report-error';
+
 async function getContributors(): Promise<unknown> {
-  const res = await fetch('https://api.github.com/repos/muxinc/next-video/contributors?per_page=18', {
-    headers: {
-      Accept: 'application/vnd.github+json',
-      'X-GitHub-Api-Version': '2022-11-28',
-    },
-    next: { revalidate: 86400 },
-  });
-  const data = await res.json();
-  return data;
+  const url = 'https://api.github.com/repos/muxinc/next-video/contributors?per_page=18';
+  try {
+    const res = await fetch(url, {
+      headers: {
+        Accept: 'application/vnd.github+json',
+        'X-GitHub-Api-Version': '2022-11-28',
+        ...(process.env.GITHUB_TOKEN ? { Authorization: `Bearer ${process.env.GITHUB_TOKEN}` } : {}),
+      },
+      next: { revalidate: 86400 },
+    });
+    if (!res.ok) {
+      await reportError(new Error(`Failed to fetch contributors: HTTP ${res.status} from ${url}`), {
+        status: res.status,
+        url,
+        rateLimitRemaining: res.headers.get('x-ratelimit-remaining'),
+      });
+      return null;
+    }
+    return await res.json();
+  } catch (error) {
+    await reportError(error, { url });
+    return null;
+  }
 }
 
 export default async function ContributorsWithData() {

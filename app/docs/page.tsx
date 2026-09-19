@@ -1,4 +1,4 @@
-import { MDXRemote } from 'next-mdx-remote/rsc';
+import { compileMDX } from 'next-mdx-remote/rsc';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
 
@@ -11,8 +11,10 @@ import VideoLDJson from '@/app/VideoLDJson';
 
 import { data } from 'app/(home)/page';
 import theme from 'app/_code/theme';
+import { reportError } from 'app/_lib/report-error';
 
 import TableOfContents from './TableOfContents';
+import { getReadme } from './readme';
 
 const Video = dynamic(() => import('next-video'));
 
@@ -32,11 +34,121 @@ export const metadata = {
   },
 };
 
+/**
+ * Compile the README to React. Returns `null` (and reports to Sentry) if the
+ * upstream Markdown cannot be compiled as MDX, so a bad README never fails the
+ * build or takes the docs page down.
+ */
+async function compileReadme(markdown: string) {
+  try {
+    const { content } = await compileMDX({
+      source: markdown,
+      components: {
+        h1: () => null,
+        h2: ({ children, id }) => (
+          <h2 id={id} className="mb-40 mt-80 text-24 font-800 -tracking-2 md:text-32">
+            {children}
+          </h2>
+        ),
+        h3: ({ children, id }) => (
+          <h3 id={id} className="mb-40 mt-40 text-21 font-800 -tracking-2 md:text-24">
+            {children}
+          </h3>
+        ),
+        h4: ({ children, id }) => (
+          <h4 id={id} className="mb-40 text-18 font-800 -tracking-2 md:text-21">
+            {children}
+          </h4>
+        ),
+        h5: ({ children, id }) => (
+          <h5 id={id} className="mb-40 font-800 -tracking-2">
+            {children}
+          </h5>
+        ),
+        h6: ({ children, id }) => (
+          <h6 id={id} className="mb-40 italic">
+            {children}
+          </h6>
+        ),
+        p: ({ children }) => <p className="mb-40 last:mb-0">{children}</p>,
+        a: ({ children, href }) => (
+          <Link href={href ?? '/'} className="underline hover:no-underline focus-visible:no-underline">
+            {children}
+          </Link>
+        ),
+        ul: ({ children }) => <ul className="mb-40 ml-20 list-disc last:mb-0">{children}</ul>,
+        ol: ({ children }) => <ol className="mb-40 ml-20 list-decimal last:mb-0">{children}</ol>,
+        code: (props) => {
+          // @ts-expect-error MDXRemote doesn't know data attributes
+          const isCodeBlock = !!props['data-language'];
+          return (
+            <code
+              className={clsx(!isCodeBlock && 'relative inline-block rounded-4 bg-gray-23 px-5 py-2 font-mono text-16')}
+            >
+              {props.children}
+            </code>
+          );
+        },
+        pre: ({ children }) => (
+          <pre className="-mx-15 mb-40 overflow-x-scroll rounded-20 border border-gray-28 bg-black/50 bg-soft-light px-15 py-30 text-16 leading-1750 backdrop-blur sm:-mx-20 sm:px-20 lg:p-40 xl:-mx-40">
+            {children}
+          </pre>
+        ),
+        table: ({ children }) => (
+          <div className="-mx-30 mb-40 overflow-x-scroll px-15 md:-mx-20 md:px-0 xl:-mx-40">
+            <table className="min-w-full border-collapse leading-1330">{children}</table>
+          </div>
+        ),
+        tr: ({ children }) => <tr className="border-b border-gray-28">{children}</tr>,
+        td: ({ children }) => <td className="px-10 py-5">{children}</td>,
+        th: ({ children }) => <th className="px-10 py-5 text-left">{children}</th>,
+      },
+      options: {
+        mdxOptions: {
+          remarkPlugins: [remarkGfm],
+          rehypePlugins: [
+            rehypeSlug,
+            [
+              rehypePrettyCode,
+              {
+                theme,
+                keepBackground: false,
+              },
+            ],
+          ],
+        },
+      },
+    });
+    return content;
+  } catch (error) {
+    await reportError(error, { source: 'next-video README', length: markdown.length });
+    return null;
+  }
+}
+
+function ReadmeUnavailable() {
+  return (
+    <>
+      <h2 id="docs-unavailable" className="mb-40 text-24 font-800 -tracking-2 md:text-32">
+        Documentation is temporarily unavailable
+      </h2>
+      <p className="mb-40 last:mb-0">
+        We could not load the docs from GitHub just now. In the meantime you can{' '}
+        <a
+          href="https://github.com/muxinc/next-video#readme"
+          className="underline hover:no-underline focus-visible:no-underline"
+        >
+          read the next-video README on GitHub
+        </a>
+        .
+      </p>
+    </>
+  );
+}
+
 export default async function Readme() {
-  const res = await fetch('https://raw.githubusercontent.com/muxinc/next-video/main/README.md', {
-    next: { revalidate: 900 },
-  });
-  const markdown = await res.text();
+  const markdown = await getReadme();
+  const content = markdown ? await compileReadme(markdown) : null;
 
   return (
     <div className="relative mx-auto my-80 grid max-w-700 grid-cols-1 justify-center gap-80 lg:my-100 lg:grid lg:max-w-1180 lg:grid-cols-[auto_minmax(0,1fr)] xl:gap-150">
@@ -64,11 +176,11 @@ export default async function Readme() {
             </Link>
             <span className="uppercase">Documentation</span>
           </h1>
-          <TableOfContents markdown={markdown} />
+          {markdown && content ? <TableOfContents markdown={markdown} /> : null}
         </div>
       </div>
       {/* content column */}
-      <main className="max-w-700 [text-wrap:pretty]" id="main">
+      <main className="max-w-700 [text-wrap:pretty] focus:outline-none" id="main" tabIndex={-1}>
         <div className="-mx-15 mb-80 flex overflow-hidden rounded-20 leading-0 sm:-mx-20 xl:-mx-40">
           <Video {...data.getStartedVideoProps} className="h-auto w-full" />
         </div>
@@ -77,86 +189,7 @@ export default async function Readme() {
           name={data.getStartedVideoMetadata.title}
           description={data.getStartedVideoMetadata.description}
         />
-        <MDXRemote
-          source={markdown}
-          components={{
-            h1: () => null,
-            h2: ({ children, id }) => (
-              <h2 id={id} className="mb-40 mt-80 text-24 font-800 -tracking-2 md:text-32">
-                {children}
-              </h2>
-            ),
-            h3: ({ children, id }) => (
-              <h3 id={id} className="mb-40 mt-40 text-21 font-800 -tracking-2 md:text-24">
-                {children}
-              </h3>
-            ),
-            h4: ({ children, id }) => (
-              <h4 id={id} className="mb-40 text-18 font-800 -tracking-2 md:text-21">
-                {children}
-              </h4>
-            ),
-            h5: ({ children, id }) => (
-              <h5 id={id} className="mb-40 font-800 -tracking-2">
-                {children}
-              </h5>
-            ),
-            h6: ({ children, id }) => (
-              <h6 id={id} className="mb-40 italic">
-                {children}
-              </h6>
-            ),
-            p: ({ children }) => <p className="mb-40 last:mb-0">{children}</p>,
-            a: ({ children, href }) => (
-              <Link href={href ?? '/'} className="underline hover:no-underline focus-visible:no-underline">
-                {children}
-              </Link>
-            ),
-            ul: ({ children }) => <ul className="mb-40 ml-20 list-disc last:mb-0">{children}</ul>,
-            ol: ({ children }) => <ol className="mb-40 ml-20 list-decimal last:mb-0">{children}</ol>,
-            code: (props) => {
-              // @ts-expect-error MDXRemote doesn't know data attributes
-              const isCodeBlock = !!props['data-language'];
-              return (
-                <code
-                  className={clsx(
-                    !isCodeBlock && 'relative inline-block rounded-4 bg-gray-23 px-5 py-2 font-mono text-16'
-                  )}
-                >
-                  {props.children}
-                </code>
-              );
-            },
-            pre: ({ children }) => (
-              <pre className="-mx-15 mb-40 overflow-x-scroll rounded-20 border border-gray-28 bg-black/50 bg-soft-light px-15 py-30 text-16 leading-1750 backdrop-blur sm:-mx-20 sm:px-20 lg:p-40 xl:-mx-40">
-                {children}
-              </pre>
-            ),
-            table: ({ children }) => (
-              <div className="-mx-30 mb-40 overflow-x-scroll px-15 md:-mx-20 md:px-0 xl:-mx-40">
-                <table className="min-w-full border-collapse leading-1330">{children}</table>
-              </div>
-            ),
-            tr: ({ children }) => <tr className="border-b border-gray-28">{children}</tr>,
-            td: ({ children }) => <td className="px-10 py-5">{children}</td>,
-            th: ({ children }) => <th className="px-10 py-5 text-left">{children}</th>,
-          }}
-          options={{
-            mdxOptions: {
-              remarkPlugins: [remarkGfm],
-              rehypePlugins: [
-                rehypeSlug,
-                [
-                  rehypePrettyCode,
-                  {
-                    theme,
-                    keepBackground: false,
-                  },
-                ],
-              ],
-            },
-          }}
-        />
+        {content ?? <ReadmeUnavailable />}
       </main>
     </div>
   );
