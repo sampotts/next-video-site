@@ -15,10 +15,18 @@ const nextConfig = {
   },
 };
 
-module.exports = withSentryConfig(withNextVideo(nextConfig), {
-  // Org, project and auth token are read from SENTRY_ORG, SENTRY_PROJECT and
-  // SENTRY_AUTH_TOKEN. Without an auth token source maps are simply not uploaded.
-  silent: !process.env.CI,
-  widenClientFileUpload: true,
-  webpack: { treeshake: { removeDebugLogging: true } },
-});
+// withNextVideo is async and returns a Promise. Next.js awaits an exported
+// Promise, but withSentryConfig does not: handed a Promise it would spread it
+// as a plain object and silently drop everything (images, next-video tracing
+// and runtime config). Resolve it first, then wrap with Sentry.
+module.exports = async () => {
+  const config = await withNextVideo(nextConfig);
+
+  return withSentryConfig(config, {
+    // Org, project and auth token are read from SENTRY_ORG, SENTRY_PROJECT and
+    // SENTRY_AUTH_TOKEN. Without an auth token source maps are simply not uploaded.
+    silent: !process.env.CI,
+    widenClientFileUpload: true,
+    webpack: { treeshake: { removeDebugLogging: true } },
+  });
+};
